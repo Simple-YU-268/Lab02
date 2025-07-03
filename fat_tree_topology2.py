@@ -1,12 +1,13 @@
-# Fat-Tree Topology Generator with Port Binding (k=4)
+# Fat-Tree Topology Generator with Correct DPID Encoding and Port Binding (k=4)
 from mininet.topo import Topo
 from mininet.net import Mininet
 from mininet.link import TCLink
 from mininet.node import RemoteController
 from mininet.cli import CLI
 
-def make_dpid(hexstr: str) -> str:
-    return hexstr.zfill(16)
+def encode_dpid(z: int, y: int, x: int = 0x01) -> str:
+    """Encodes DPID as 0xZZYYXX (z=pod or k, y=id, x=0x01)"""
+    return f"{z:02x}{y:02x}{x:02x}".zfill(16)
 
 class FatTreeTopo(Topo):
     def build(self, k=4):
@@ -17,15 +18,15 @@ class FatTreeTopo(Topo):
         agg_switches = []
         edge_switches = []
 
-        # Core Switches
-        for j in range(1, k // 2 + 1):
-            for i in range(1, k // 2 + 1):
+        # Core Switches (k/2 x k/2 grid)
+        for j in range(k // 2):
+            for i in range(k // 2):
                 name = f'core_{j}_{i}'
-                dpid = make_dpid(f'{k:02x}{j:02x}{i:02x}')
+                dpid = encode_dpid(k, j * (k // 2) + i)
                 sw = self.addSwitch(name, dpid=dpid, protocols='OpenFlow13')
                 core_switches.append(sw)
 
-        # Aggregation and Edge Switches
+        # Pods
         for pod in range(k):
             pod_agg = []
             pod_edge = []
@@ -33,7 +34,7 @@ class FatTreeTopo(Topo):
             # Aggregation switches
             for i in range(k // 2):
                 name = f'agg_{pod}_{i}'
-                dpid = make_dpid(f'{pod:02x}{(i + k//2):02x}01')
+                dpid = encode_dpid(pod, i + k // 2)
                 sw = self.addSwitch(name, dpid=dpid, protocols='OpenFlow13')
                 pod_agg.append(sw)
                 agg_switches.append(sw)
@@ -41,34 +42,34 @@ class FatTreeTopo(Topo):
             # Edge switches and hosts
             for i in range(k // 2):
                 name = f'edge_{pod}_{i}'
-                dpid = make_dpid(f'{pod:02x}{i:02x}01')
+                dpid = encode_dpid(pod, i)
                 sw = self.addSwitch(name, dpid=dpid, protocols='OpenFlow13')
                 pod_edge.append(sw)
                 edge_switches.append(sw)
 
-                # Hosts: port1 = h (0,1), edge端口固定为0/1
+                # Hosts: port 0,1 on edge
                 for h in range(k // 2):
                     host_ip = f'10.{pod}.{i}.{h + 2}'
                     host_name = f'h{pod}_{i}_{h}'
                     host = self.addHost(host_name, ip=host_ip)
-                    self.addLink(sw, host, port1=h)  # ✅ 明确绑定 port 0/1
+                    self.addLink(sw, host, port1=h)
 
-            # Edge <-> Agg：port1=agg侧 port=(k//2 + edge_index)，port2=edge侧 port=edge_index
+            # Edge <-> Agg intra-pod links
             for a, agg in enumerate(pod_agg):
                 for e, edge in enumerate(pod_edge):
                     self.addLink(agg, edge,
-                                 port1=e,  # agg 侧使用上半部分端口改为e？
-                                 port2=a + k // 2)  # edge 侧使用下半部分端口
+                                 port1=e,               # agg uses port 0,1 for edge
+                                 port2=a + k // 2)      # edge uses port 2,3 for agg
 
-        # Core <-> Agg：每个core列连接每个pod的agg
-        for i in range(k // 2):  # 每列
-            for j in range(k // 2):  # 每行 core
-                core = core_switches[i * (k // 2) + j]
+        # Core <-> Agg inter-pod links
+        for i in range(k // 2):
+            for j in range(k // 2):
+                core = core_switches[j * (k // 2) + i]  # row-major
                 for pod in range(k):
                     agg = agg_switches[pod * (k // 2) + i]
                     self.addLink(core, agg,
-                                 port1=pod,           # core输出端口 = pod编号
-                                 port2=j + k // 2)    # agg输入端口 = core行号 + k//2
+                                 port1=pod,             # core uses port=pod
+                                 port2=j + k // 2)      # agg uses port 2,3 for core
 
 if __name__ == '__main__':
     import argparse
