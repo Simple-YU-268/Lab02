@@ -57,18 +57,18 @@ class FatTreeTopo(Topo):
             for a, agg in enumerate(pod_agg):
                 for e, edge in enumerate(pod_edge):
                     self.addLink(agg, edge,
-                                 port1=e + k // 2,  # agg 侧使用上半部分端口
+                                 port1=e,  # agg 侧使用上半部分端口改为e？
                                  port2=a + k // 2)  # edge 侧使用下半部分端口
 
         # Core <-> Agg：每个core列连接每个pod的agg
         for i in range(k // 2):  # 每列
             for j in range(k // 2):  # 每行 core
-                core = core_switches[i * (k // 2) + j]
+                core = core_switches[i * (k // 2) + j]s
                 for pod in range(k):
                     agg = agg_switches[pod * (k // 2) + i]
                     self.addLink(core, agg,
-                                 port1=pod,     # core输出端口 = pod编号
-                                 port2=j)       # agg输入端口 = core行号
+                                 port1=pod,           # core输出端口 = pod编号
+                                 port2=j + k // 2)    # agg输入端口 = core行号 + k//2
 
 if __name__ == '__main__':
     import argparse
