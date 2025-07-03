@@ -5,7 +5,6 @@ from ryu.controller.handler import set_ev_cls
 from ryu.ofproto import ofproto_v1_3
 from ryu.lib.packet import ipv4
 
-
 class FatTreeRouting(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
 
@@ -59,7 +58,6 @@ class FatTreeRouting(app_manager.RyuApp):
         inst = [parser.OFPInstructionActions(ofproto.OFPIT_APPLY_ACTIONS, actions)]
         mod = parser.OFPFlowMod(datapath=dp, priority=priority, match=match, instructions=inst)
         dp.send_msg(mod)
-
         self.logger.info(f"Flow added: DPID={format(dp.id, '016x')} prio={priority}, match={match}, actions={actions}")
 
     # === Edge Switch Rules ===
@@ -78,6 +76,7 @@ class FatTreeRouting(app_manager.RyuApp):
         for h in range(self.k // 2):
             last_octet = h + 2
             port = h + 2  # Return traffic from core/agg
+            # 只匹配最后一个字节，掩码应为/32，IP写成0.0.0.X
             suffix_ip = f'0.0.0.{last_octet}'
             match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(suffix_ip, 32))
             actions = [parser.OFPActionOutput(port)]
@@ -114,4 +113,3 @@ class FatTreeRouting(app_manager.RyuApp):
             match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(ip_prefix, 16))
             actions = [parser.OFPActionOutput(port)]
             self.add_flow(dp, 10, match, actions)
-
