@@ -68,7 +68,16 @@ class FatTreeTopo(Topo):
                     self.addLink(core, agg)  # No port assignment
 
 if __name__ == '__main__':
-    topo = FatTreeTopo(k=4)
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Run Fat-Tree topology with specified k.')
+    parser.add_argument('--k', type=int, default=4, help='Number of ports per switch (must be even)')
+    args = parser.parse_args()
+
+    if args.k % 2 != 0:
+        raise ValueError("k must be even")
+
+    topo = FatTreeTopo(k=args.k)
     net = Mininet(topo=topo, link=TCLink, controller=None,
                   autoSetMacs=True, autoStaticArp=True)
 
