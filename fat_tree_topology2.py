@@ -63,7 +63,7 @@ class FatTreeTopo(Topo):
         # Core <-> Agg：每个core列连接每个pod的agg
         for i in range(k // 2):  # 每列
             for j in range(k // 2):  # 每行 core
-                core = core_switches[i * (k // 2) + j]s
+                core = core_switches[i * (k // 2) + j]
                 for pod in range(k):
                     agg = agg_switches[pod * (k // 2) + i]
                     self.addLink(core, agg,
