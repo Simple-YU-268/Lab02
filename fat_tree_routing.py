@@ -39,16 +39,17 @@ class FatTreeRouting(app_manager.RyuApp):
             self.install_core_flows(dp)
 
     def identify_switch(self, dpid):
-        x = dpid & 0xff
-        y = (dpid >> 8) & 0xff
-        z = (dpid >> 16) & 0xff
-        if x == 0x01:
-            if y >= self.k // 2:
-                return 'agg', (z, y - self.k // 2)
-            else:
-                return 'edge', (z, y)
+        x = dpid & 0xff               # i (列号)
+        y = (dpid >> 8) & 0xff        # j (行号)
+        z = (dpid >> 16) & 0xff       # pod 或 k
+
+        if z == self.k:
+            return 'core', (y, x)
+        elif y >= self.k // 2:
+            return 'agg', (z, y - self.k // 2)
         else:
-            return 'core', ()
+            return 'edge', (z, y)
+
 
     def add_flow(self, dp, priority, match, actions):
         parser = dp.ofproto_parser
@@ -65,14 +66,14 @@ class FatTreeRouting(app_manager.RyuApp):
         for h in range(self.k // 2):
             ip = f'10.{pod}.{edge}.{h + 2}'
             port = h + 1
-            match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(ip, 32))
+            match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(ip, "255.255.255.255"))
             actions = [parser.OFPActionOutput(port)]
             self.add_flow(dp, 10, match, actions)
         # (2) 上行: 其它IP包全部上送agg
         for x in range(2, 2 + self.k // 2):  # host ID x
             port = (x - 2 + edge) % (self.k // 2) + (self.k // 2) + 1  # 上行端口
             ip = f'0.0.0.{x}'
-            match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(ip, 0x000000ff))
+            match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(ip, "0.0.0.255"))
             actions = [parser.OFPActionOutput(port)]
             self.add_flow(dp, 1, match, actions)
 
@@ -85,14 +86,14 @@ class FatTreeRouting(app_manager.RyuApp):
         for edge in range(self.k // 2):
             subnet_ip = f'10.{pod}.{edge}.0'
             port = edge + 1
-            match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(subnet_ip, 24))
+            match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(subnet_ip, "255.255.255.0"))
             actions = [parser.OFPActionOutput(port)]
             self.add_flow(dp, 10, match, actions)
          # (2) 后缀分流：遍历所有主机IP，末尾为x的都下发到指定上行端口
         for x in range(2, 2 + self.k // 2):
-            port = (x - 2 + agg) % (self.k // 2) + (self.k // 2)
+            port = (x - 2 + agg) % (self.k // 2) + (self.k // 2) + 1
             ip = f'0.0.0.{x}'
-            match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(ip, 0x000000ff))
+            match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(ip, "0.0.0.255"))
             actions = [parser.OFPActionOutput(port)]
             self.add_flow(dp, 1, match, actions)
     # === Core Switch Rules ===
@@ -101,7 +102,7 @@ class FatTreeRouting(app_manager.RyuApp):
         # (1) 10.pod.0.0/16 -> pod对应端口
         for pod in range(self.k):
             ip_prefix = f'10.{pod}.0.0'
-            port = pod
-            match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(ip_prefix, 16))
+            port = pod + 1
+            match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(ip_prefix, "255.255.0.0"))
             actions = [parser.OFPActionOutput(port)]
             self.add_flow(dp, 10, match, actions)
