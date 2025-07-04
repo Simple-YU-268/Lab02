@@ -61,22 +61,22 @@ class FatTreeRouting(app_manager.RyuApp):
     # === Edge Switch Rules ===
     def install_edge_flows(self, dp, pod, edge):
         parser = dp.ofproto_parser
-        # (1) Host-specific规则: 10.pod.edge.(2/3) -> 本地端口0/1
+        # (1) Host-specific规则: 10.pod.edge.(2/3) -> 本地端口1/2
         for h in range(self.k // 2):
             ip = f'10.{pod}.{edge}.{h + 2}'
-            port = h
+            port = h + 1
             match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(ip, 32))
             actions = [parser.OFPActionOutput(port)]
             self.add_flow(dp, 10, match, actions)
         # (2) 上行: 其它IP包全部上送agg
-        for x in range(2, 2 + self.k // 2):
-            port = x  # 或自定义端口
-            for pod_ in range(self.k):
-               for edge_ in range(self.k // 2):
-                    ip = f'10.{pod_}.{edge_}.{x}'
-                    match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(ip, 32))
-                    actions = [parser.OFPActionOutput(port)]
-                    self.add_flow(dp, 1, match, actions)
+        for x in range(2, 2 + self.k // 2):  # host ID x
+            port = (x - 2 + edge) % (self.k // 2) + (self.k // 2) + 1  # 上行端口
+            ip = f'0.0.0.{x}'
+            match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(ip, 0x000000ff))
+            actions = [parser.OFPActionOutput(port)]
+            self.add_flow(dp, 1, match, actions)
+
+
 
     # === Aggregation Switch Rules ===
     def install_agg_flows(self, dp, pod, agg):
@@ -84,20 +84,17 @@ class FatTreeRouting(app_manager.RyuApp):
         # (1) 下行: 10.pod.edge.0/24 -> 对应edge端口
         for edge in range(self.k // 2):
             subnet_ip = f'10.{pod}.{edge}.0'
-            port = edge
+            port = edge + 1
             match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(subnet_ip, 24))
             actions = [parser.OFPActionOutput(port)]
             self.add_flow(dp, 10, match, actions)
          # (2) 后缀分流：遍历所有主机IP，末尾为x的都下发到指定上行端口
         for x in range(2, 2 + self.k // 2):
-            port = (x - 2 + agg) % (self.k // 2) + (self.k // 2)  # 2/3端口
-            for pod_ in range(self.k):
-                for edge_ in range(self.k // 2):
-                    ip = f'10.{pod_}.{edge_}.{x}'
-                    match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(ip, 32))
-                    actions = [parser.OFPActionOutput(port)]
-                    self.add_flow(dp, 1, match, actions)
-
+            port = (x - 2 + agg) % (self.k // 2) + (self.k // 2)
+            ip = f'0.0.0.{x}'
+            match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(ip, 0x000000ff))
+            actions = [parser.OFPActionOutput(port)]
+            self.add_flow(dp, 1, match, actions)
     # === Core Switch Rules ===
     def install_core_flows(self, dp):
         parser = dp.ofproto_parser
