@@ -3,7 +3,6 @@ from ryu.controller import ofp_event
 from ryu.controller.handler import CONFIG_DISPATCHER
 from ryu.controller.handler import set_ev_cls
 from ryu.ofproto import ofproto_v1_3
-from ryu.lib.packet import ipv4
 
 class FatTreeRouting(app_manager.RyuApp):
     OFP_VERSIONS = [ofproto_v1_3.OFP_VERSION]
@@ -11,7 +10,6 @@ class FatTreeRouting(app_manager.RyuApp):
     def __init__(self, *args, **kwargs):
         super(FatTreeRouting, self).__init__(*args, **kwargs)
         self.k = 4  # Fat-tree parameter
-        self.hosts_per_edge = self.k // 2
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
@@ -63,53 +61,50 @@ class FatTreeRouting(app_manager.RyuApp):
     # === Edge Switch Rules ===
     def install_edge_flows(self, dp, pod, edge):
         parser = dp.ofproto_parser
-
-        # (1) Prefix /32: Forward packets to local host (host-specific rules)
+        # (1) Host-specific规则: 10.pod.edge.(2/3) -> 本地端口0/1
         for h in range(self.k // 2):
             ip = f'10.{pod}.{edge}.{h + 2}'
             port = h
             match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(ip, 32))
             actions = [parser.OFPActionOutput(port)]
             self.add_flow(dp, 10, match, actions)
-
-        # (2) Suffix /32: Match returning traffic using destination suffix (0.0.0.X)
-        for h in range(self.k // 2):
-            last_octet = h + 2
-            port = h + 2  # Return traffic from core/agg
-            # 只匹配最后一个字节，掩码应为/32，IP写成0.0.0.X
-            suffix_ip = f'0.0.0.{last_octet}'
-            match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(suffix_ip, 32))
-            actions = [parser.OFPActionOutput(port)]
-            self.add_flow(dp, 1, match, actions)
+        # (2) 上行: 其它IP包全部上送agg
+        for x in range(2, 2 + self.k // 2):
+            port = x  # 或自定义端口
+            for pod_ in range(self.k):
+               for edge_ in range(self.k // 2):
+                    ip = f'10.{pod_}.{edge_}.{x}'
+                    match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(ip, 32))
+                    actions = [parser.OFPActionOutput(port)]
+                    self.add_flow(dp, 1, match, actions)
 
     # === Aggregation Switch Rules ===
     def install_agg_flows(self, dp, pod, agg):
         parser = dp.ofproto_parser
-
-        # (1) Prefix /24: Forward packets to correct edge switch based on third octet
+        # (1) 下行: 10.pod.edge.0/24 -> 对应edge端口
         for edge in range(self.k // 2):
             subnet_ip = f'10.{pod}.{edge}.0'
             port = edge
             match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(subnet_ip, 24))
             actions = [parser.OFPActionOutput(port)]
             self.add_flow(dp, 10, match, actions)
-
-        # (2) Suffix /8: Return traffic from core using suffix matching and load balancing
-        for i in range(2, 2 + self.k // 2):
-            port = (i - 2 + agg) % (self.k // 2) + (self.k // 2)
-            suffix_ip = f'0.0.0.{i}'
-            match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(suffix_ip, 8))
-            actions = [parser.OFPActionOutput(port)]
-            self.add_flow(dp, 1, match, actions)
+         # (2) 后缀分流：遍历所有主机IP，末尾为x的都下发到指定上行端口
+        for x in range(2, 2 + self.k // 2):
+            port = (x - 2 + agg) % (self.k // 2) + (self.k // 2)  # 2/3端口
+            for pod_ in range(self.k):
+                for edge_ in range(self.k // 2):
+                    ip = f'10.{pod_}.{edge_}.{x}'
+                    match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(ip, 32))
+                    actions = [parser.OFPActionOutput(port)]
+                    self.add_flow(dp, 1, match, actions)
 
     # === Core Switch Rules ===
     def install_core_flows(self, dp):
         parser = dp.ofproto_parser
-
-        # (1) Prefix /16: Forward packets to destination pod
+        # (1) 10.pod.0.0/16 -> pod对应端口
         for pod in range(self.k):
             ip_prefix = f'10.{pod}.0.0'
-            port = pod  # Assuming core port i connects to pod i
+            port = pod
             match = parser.OFPMatch(eth_type=0x0800, ipv4_dst=(ip_prefix, 16))
             actions = [parser.OFPActionOutput(port)]
             self.add_flow(dp, 10, match, actions)
